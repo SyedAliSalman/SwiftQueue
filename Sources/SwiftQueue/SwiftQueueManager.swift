@@ -22,6 +22,9 @@
 
 import Foundation
 import Dispatch
+#if canImport(BackgroundTasks)
+import BackgroundTasks
+#endif
 
 /// Global manager to perform operations on all your queues/
 /// You will have to keep this instance. We highly recommend you to store this instance in a Singleton
@@ -113,7 +116,40 @@ public final class SwiftQueueManager {
     }
 
 }
+@available(iOS 13.0, tvOS 13.0, macOS 10.15, *)
+/// Extension of SwiftQueueManager to support BackgroundTask API from iOS 13.
+public extension SwiftQueueManager {
 
+    /// Register task that can potentially run in Background (Using BackgroundTask API)
+    /// Registration of all launch handlers must be complete before the end of applicationDidFinishLaunching(_:)
+    /// https://developer.apple.com/documentation/backgroundtasks/bgtaskscheduler/3180427-register
+    public func registerForBackgroundTask(forTaskWithUUID: String) {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: forTaskWithUUID, using: nil) { [weak self] task in
+            if let operation = self?.getOperation(forUUID: task.identifier) {
+                task.expirationHandler = {
+                    operation.done(.fail(SwiftQueueError.timeout))
+                }
+                operation.handler.onRun(callback: TaskJobResult(actual: operation, task: task))
+            }
+        }
+    }
+
+    /// Call this method when application is entering background to schedule jobs as background task
+    public func applicationDidEnterBackground() {
+        for operation in getAllAllowBackgroundOperation() {
+            operation.scheduleBackgroundTask()
+        }
+    }
+
+    /// Cancel all possible background Task
+    public func cancelAllBackgroundTask() {
+        for operation in getAllAllowBackgroundOperation() {
+            if let uuid = operation.name {
+                BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: uuid)
+            }
+        }
+    }
+}
 /// Extension to query Job Manager
 public extension SwiftQueueManager {
     /// number of queue
